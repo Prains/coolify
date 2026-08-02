@@ -1,18 +1,32 @@
 <?php
 
+use App\Console\Commands\Generate\Services;
+use Illuminate\Console\OutputStyle;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\NullOutput;
 use Symfony\Component\Yaml\Yaml;
+use Tests\TestCase;
 
-it('publishes a PostHog one-click service template with representative services', function () {
-    foreach (['service-templates.json', 'service-templates-latest.json'] as $templateFile) {
-        $templates = json_decode(
-            file_get_contents(__DIR__."/../../templates/{$templateFile}"),
-            associative: true,
-            flags: JSON_THROW_ON_ERROR,
-        );
+uses(TestCase::class);
 
-        expect($templates)->toHaveKey('posthog');
+$generatePosthogTemplate = function (string $methodName): array {
+    $command = new Services;
+    $command->setOutput(new OutputStyle(new ArrayInput([]), new NullOutput));
+    $method = new ReflectionMethod($command, $methodName);
+    $payload = $method->invoke($command, 'posthog.yaml');
 
-        $encodedCompose = $templates['posthog']['compose'];
+    expect($payload)->toBeArray();
+
+    return $payload;
+};
+
+it('publishes a PostHog one-click service template with representative services', function () use ($generatePosthogTemplate) {
+    foreach (['processFile', 'processFileWithFqdn'] as $methodName) {
+        $template = $generatePosthogTemplate($methodName);
+
+        expect($template['name'] ?? null)->toBe('posthog');
+
+        $encodedCompose = $template['compose'] ?? null;
         expect($encodedCompose)->toBeString();
 
         $generatedCompose = base64_decode($encodedCompose, strict: true);
@@ -27,7 +41,7 @@ it('publishes a PostHog one-click service template with representative services'
     }
 });
 
-it('publishes absolute FQDN URLs and a Content-Encoding-compatible SeaweedFS image', function () {
+it('publishes absolute FQDN URLs and a Content-Encoding-compatible SeaweedFS image', function () use ($generatePosthogTemplate) {
     $sourceTemplate = file_get_contents(__DIR__.'/../../templates/compose/posthog.yaml');
 
     expect($sourceTemplate)
@@ -35,7 +49,7 @@ it('publishes absolute FQDN URLs and a Content-Encoding-compatible SeaweedFS ima
         ->toContain('image: chrislusf/seaweedfs:4.29');
 
     $catalogExpectations = [
-        'service-templates.json' => [
+        'processFileWithFqdn' => [
             'urls' => [
                 'SITE_URL=https://${SERVICE_FQDN_POSTHOG}',
                 'OBJECT_STORAGE_PUBLIC_ENDPOINT=https://${SERVICE_FQDN_POSTHOG}',
@@ -47,7 +61,7 @@ it('publishes absolute FQDN URLs and a Content-Encoding-compatible SeaweedFS ima
                 'LIVESTREAM_HOST=${SERVICE_URL_POSTHOG}/livestream',
             ],
         ],
-        'service-templates-latest.json' => [
+        'processFile' => [
             'urls' => [
                 'SITE_URL=${SERVICE_URL_POSTHOG}',
                 'OBJECT_STORAGE_PUBLIC_ENDPOINT=${SERVICE_URL_POSTHOG}',
@@ -61,13 +75,9 @@ it('publishes absolute FQDN URLs and a Content-Encoding-compatible SeaweedFS ima
         ],
     ];
 
-    foreach ($catalogExpectations as $templateFile => $expectations) {
-        $templates = json_decode(
-            file_get_contents(__DIR__."/../../templates/{$templateFile}"),
-            associative: true,
-            flags: JSON_THROW_ON_ERROR,
-        );
-        $generatedCompose = base64_decode($templates['posthog']['compose'], strict: true);
+    foreach ($catalogExpectations as $methodName => $expectations) {
+        $template = $generatePosthogTemplate($methodName);
+        $generatedCompose = base64_decode($template['compose'], strict: true);
         $compose = Yaml::parse($generatedCompose);
 
         expect($generatedCompose)->toContain(...$expectations['urls']);

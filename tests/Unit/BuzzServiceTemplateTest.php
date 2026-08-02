@@ -1,6 +1,25 @@
 <?php
 
-it('includes a production-ready Buzz one-click service template', function () {
+use App\Console\Commands\Generate\Services;
+use Illuminate\Console\OutputStyle;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\NullOutput;
+use Tests\TestCase;
+
+uses(TestCase::class);
+
+$generateServiceTemplate = function (string $file, string $methodName): array {
+    $command = new Services;
+    $command->setOutput(new OutputStyle(new ArrayInput([]), new NullOutput));
+    $method = new ReflectionMethod($command, $methodName);
+    $payload = $method->invoke($command, $file);
+
+    expect($payload)->toBeArray();
+
+    return $payload;
+};
+
+it('includes a production-ready Buzz one-click service template', function () use ($generateServiceTemplate) {
     $compose = file_get_contents(__DIR__.'/../../templates/compose/buzz.yaml');
 
     expect($compose)
@@ -17,25 +36,21 @@ it('includes a production-ready Buzz one-click service template', function () {
         ->toContain('postgres:17-alpine')
         ->toContain('redis:7-alpine');
 
-    foreach (['service-templates.json', 'service-templates-latest.json'] as $templateFile) {
-        $templates = json_decode(
-            file_get_contents(__DIR__."/../../templates/{$templateFile}"),
-            associative: true,
-            flags: JSON_THROW_ON_ERROR,
-        );
+    foreach (['processFileWithFqdn', 'processFile'] as $methodName) {
+        $template = $generateServiceTemplate('buzz.yaml', $methodName);
 
-        expect($templates)->toHaveKey('buzz');
-        expect($templates['buzz']['port'] ?? null)->toBe('3000');
-        expect($templates['buzz']['logo'] ?? null)->toBe('svgs/buzz.svg');
-        expect($templates['buzz']['category'] ?? null)->toBe('messaging');
+        expect($template['name'] ?? null)->toBe('buzz');
+        expect($template['port'] ?? null)->toBe('3000');
+        expect($template['logo'] ?? null)->toBe('svgs/buzz.svg');
+        expect($template['category'] ?? null)->toBe('messaging');
 
-        $generatedCompose = base64_decode($templates['buzz']['compose'], strict: true);
+        $generatedCompose = base64_decode($template['compose'], strict: true);
 
         expect($generatedCompose)
             ->toContain('ghcr.io/block/buzz:${BUZZ_TAG:-main}')
             ->toContain('wss://');
 
-        if ($templateFile === 'service-templates.json') {
+        if ($methodName === 'processFileWithFqdn') {
             expect($generatedCompose)
                 ->toContain('BUZZ_MEDIA_BASE_URL=https://${SERVICE_FQDN_BUZZ}/media')
                 ->toContain('BUZZ_CORS_ORIGINS=https://${SERVICE_FQDN_BUZZ}');
@@ -48,12 +63,8 @@ it('includes a production-ready Buzz one-click service template', function () {
         }
     }
 
-    $fqdnTemplates = json_decode(
-        file_get_contents(__DIR__.'/../../templates/service-templates.json'),
-        associative: true,
-        flags: JSON_THROW_ON_ERROR,
-    );
-    $chaskiqCompose = base64_decode($fqdnTemplates['chaskiq']['compose'], strict: true);
+    $chaskiqTemplate = $generateServiceTemplate('chaskiq.yaml', 'processFileWithFqdn');
+    $chaskiqCompose = base64_decode($chaskiqTemplate['compose'], strict: true);
 
     expect($chaskiqCompose)
         ->toContain('HOST=${SERVICE_FQDN_CHASKIQ_3000}')
